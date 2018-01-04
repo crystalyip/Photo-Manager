@@ -1,0 +1,1055 @@
+package sample;
+
+import Tagger.*;
+import Tagger.LogObject;
+
+import java.awt.Desktop;
+import java.util.Collections;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.event.EventHandler;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.input.MouseEvent;
+import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
+import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
+import javafx.scene.text.Text;
+import javafx.stage.DirectoryChooser;
+import javafx.stage.Stage;
+import java.io.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+
+public class ControllerOld {
+
+  // The ControllerOld's user and data manager
+  private Controller user;
+  private DataManager m;
+
+  // stage properties
+  private Text actionStatus;
+  private Stage primaryStage;
+  private File selectedFile;
+
+  // serializable arrayLists
+
+  // For image launching
+  private ListView<File> picsListView;
+  // launches listview of folders in current directory
+  private ListView<File> folderListView;
+  private Stage galleryStage;
+
+  // Map to keep track of scenes and associated info
+  private HashMap<Integer, ArrayList> scenesMap = new HashMap<>();
+  private Integer numScenes = 0;
+
+  // Log table launch
+  private Stage logStage;
+
+  //Keeps track of which ImageView is associated with which file
+  private HashMap<File, ImageView> mapFileToImageView;
+
+  // A TilePane for the image gallery
+  // TilePane must be updated when images are renamed
+  private TilePane tile;
+
+  // Image stage for whenever an image is selected
+  private Stage imageStage;
+
+  // ObservableList that needs to be updated upon renaming
+  private ObservableList<File> imageItems;
+
+  // folderListView's folders to display
+  private ObservableList<File> folderItems;
+
+  // Stage for the naming history of the image
+  private Stage oldNamesStage;
+
+  // nodes that will be updated upon user interaction
+  private BorderPane all; // A pane that contains all nodes in the galleryStage
+  private VBox scrollBar; // scrollbar for the gallery images
+  private VBox imageBox; // imageBox contains the grid of images
+
+  private ListView<String> allTags;
+
+  ControllerOld(Controller user, Stage primaryStage) {
+    // Set up primary stage with model and view
+    this.user = user; // the model
+    m = new DataManager(); // the view
+    this.user.addObserver(m); // add file manager as an observer
+    this.primaryStage = primaryStage;
+
+  }
+
+
+  /**
+   * (Nov. 10/17) Adapted idea of a single folder chooser from a "single file chooser" found in the
+   * link below https://stackoverflow.com/questions/37769481/javafx-gui-that-opens-a-text-file-
+   * how-to-read-whats-in-text-file-and-edit-save A file chooser that selects a directory that user
+   * has chosen from the directory browser popup
+   *
+   * @param imageItems The ObservableList to be updated for picsListView after File move
+   * @throws IOException If moving File fails
+   */
+  private void showSingleFolderChooser(ObservableList imageItems) throws IOException {
+    // launch a new directory chooser
+    DirectoryChooser folderChooser = new DirectoryChooser();
+    File selectedFolder = folderChooser.showDialog(primaryStage);
+
+    // if a folder was selected
+    if (selectedFolder != null) {
+      //image files in gallery will update when a file is moved out
+      File originalFile = user.getCurrentFile();
+
+      if (user.moveFile(selectedFolder.getCanonicalPath() + "/")) {
+        //Get image of file
+        ImageView image = mapFileToImageView.get(originalFile);
+        //remove image from image display
+        tile.getChildren().remove(image);
+        mapFileToImageView.remove(originalFile);
+        //remove file from list display
+        imageItems.remove(originalFile);
+        actionStatus.setText("File " + originalFile.getName() + " moved");
+        // Go back to image gallery when selected file is removed from folder
+        all.getChildren().removeAll(imageBox);
+        all.setTop(scrollBar);
+      } else {
+        actionStatus
+            .setText("File " + originalFile.getName() + " already exists in selected folder");
+      }
+    } else {
+      actionStatus.setText("Folder selection cancelled.");
+    }
+  }
+
+
+  /**
+   * (Nov. 9/17) Serialization adapted from: https://beginnersbook.com/2013/12/how-to-serialize-arraylist-in-java/
+   * A method to deserialize the DataManager DataManger contains all information that needs to be
+   * retrieved when the application has been restarted
+   */
+  void deserialize() {
+    // create a new serialize file
+    File serFile = new File("filemanager.ser");
+
+    // check if a filemanager.ser file exists
+    if (serFile.exists() && !serFile
+        .isDirectory()) { // previous information has been serialized before
+      try {
+        // get the ser file
+        FileInputStream fis = new FileInputStream("filemanager.ser");
+        // get the objects serialized in the ser file
+        ObjectInputStream ois = new ObjectInputStream(fis);
+
+        // if a previous DataManager has been serialized, set the current DataManger to the previously serialized -
+        // DataManager
+        DataManager fm = (DataManager) ois.readObject();
+        if (fm != null) {
+          // delete the current DataManager from the observer list and replace it with the deserialized DataManager
+          this.user.deleteObserver(m);
+          m = fm;
+          this.user.addObserver(m);
+        }
+        // close the input files
+        ois.close();
+        fis.close();
+      } catch (IOException ioe) {
+        System.out.println("Controller has not made any changes yet.");
+      } catch (ClassNotFoundException c) {
+        System.out.println("Class not found");
+        c.printStackTrace();
+      }
+    }
+  }
+
+
+  /**
+   * (Nov. 9/17) Serialization adapted from: https://beginnersbook.com/2013/12/how-to-serialize-arraylist-in-java/
+   * A method to serialize information Information being serialized: data in DataManager including
+   * loggables and - allImageFiles
+   */
+  private void serialize() {
+    try {
+      // write the serialized objects to a ser file
+      FileOutputStream fos = new FileOutputStream("filemanager.ser");
+      ObjectOutputStream oos = new ObjectOutputStream(fos);
+      oos.writeObject(m);
+      // close the input streams
+      oos.close();
+      fos.close();
+    } catch (IOException ioe) {
+      ioe.printStackTrace();
+    }
+  }
+
+
+  /**
+   * launch a view of all images from a selected directory
+   */
+  void launchDirectoryImages() throws IOException {
+    Stage dirStage = new Stage();
+    // launch directory choose for user to choose directory
+    DirectoryChooser directoryChooser = new DirectoryChooser();
+    File chosen = directoryChooser.showDialog(dirStage);
+
+    //retrieve list of directory's files
+    ArrayList<File> directoryPics = m.getFiles(chosen);
+
+    //Once you choose a directory, a new window opens displaying the images
+    if (galleryStage == null) {
+      galleryStage = new Stage();
+    }
+
+    // Status message text
+    actionStatus = new Text();
+    actionStatus.setFont(Font.font("Calibri", FontWeight.NORMAL, 13));
+    actionStatus.setFill(Color.GREEN);
+
+    // Adapted from (Nov10/2017):
+    // https://docs.oracle.com/javase/8/javafx/user-interface-tutorial/list-view.htm#CEGGEDBF
+    // picsListView is a ListView of all image in files in chosen directory
+    picsListView = new ListView<>();
+    // make the items in picsListView Observable
+    imageItems = FXCollections.observableArrayList(directoryPics);
+    picsListView.setItems(imageItems);
+    picsListView.setCellFactory(list -> new FileDisplay());
+
+    //https://stackoverflow.com/questions/9722418/how-to-handle-listview-item-clicked-action
+
+    //HashMap to keep track of which ImageView is associated with which file
+    mapFileToImageView = new HashMap<>();
+    picsListView.setOnMouseClicked(e -> {
+      try {
+        launchImage(picsListView.getSelectionModel().getSelectedItem());
+      } catch (IOException e1) {
+        e1.printStackTrace();
+      }
+    });
+
+    // listview that displays subdirectories of directory
+    folderListView = new ListView<>();
+    ArrayList<File> directoryFolders = new ArrayList<>();
+    File[] files = chosen.listFiles();
+    if (files != null) {
+      for (File file : files) {
+        if (file.isDirectory()) {
+          directoryFolders.add(file);
+        }
+      }
+    }
+
+    ObservableList<File> folderItems = FXCollections.observableArrayList(directoryFolders);
+
+    folderListView.setItems(folderItems);
+    folderListView.setCellFactory(list -> new FolderDisplay());
+
+    Button buttonFolder = new Button("Go to folder");
+
+    buttonFolder.setOnAction(e -> {
+      File chosenFolder = folderListView.getSelectionModel().getSelectedItem();
+      try {
+        launchFolderImages(chosenFolder);
+      } catch (IOException e2) {
+        e2.printStackTrace();
+      }
+    });
+
+    HBox folderHBox = new HBox();
+    folderHBox.getChildren().addAll(buttonFolder);
+    folderHBox.setAlignment(Pos.TOP_RIGHT);
+
+    Text picsText = new Text("Images:");
+    Text folderText = new Text("Folders:");
+
+    VBox picsVBox = new VBox(10);
+    picsVBox.getChildren().addAll(picsText, picsListView);
+
+    VBox folderVBox = new VBox(10);
+    folderVBox.getChildren().addAll(folderText, folderListView, folderHBox);
+
+    HBox listHBox = new HBox(10);
+    listHBox.getChildren().addAll(picsVBox, folderVBox);
+    picsListView.setPrefWidth(420);
+    folderListView.setPrefWidth(420);
+    listHBox.setAlignment(Pos.CENTER);
+
+    // Adapted from (Nov10/2017):
+    // https://stackoverflow.com/questions/27182323/working-on-creating-image-gallery-in-javafx-not-able-to-display-image-properly
+    // create a new tile pane for the image gallery
+    tile = new TilePane();
+
+    tile.setPadding(new Insets(15, 15, 15, 15));
+    tile.setHgap(15);
+
+    try {
+      for (final File file : imageItems) {
+        // create the image that will be loaded onto the ImageView
+        Image image = new Image(new FileInputStream(file));
+        // set up the ImageView
+        ImageView imageView = new ImageView(image);
+        imageView.setFitWidth(250);
+        imageView.setPreserveRatio(true);
+
+        // add the imageView to the tile
+        tile.getChildren().addAll(imageView);
+
+        // when an image is clicked, launch the stage so user can see detailed view of image
+        imageView.setOnMouseClicked(new SingleClick(file));
+
+        // put the File and its associated ImageView onto the map
+        mapFileToImageView.put(file, imageView);
+      }
+    } catch (FileNotFoundException c) {
+      c.printStackTrace();
+
+    }
+    // a new scroll pane so user can scroll through images in the gallery
+    ScrollPane scroll = new ScrollPane();
+    // scroll properties
+    scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+    scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+    scroll.setFitToWidth(true);
+    scroll.setContent(tile);
+
+    // button for moving a file to another directory
+    Button buttonMoveFile = new Button("Move To...");
+    buttonMoveFile.setOnAction(e -> {
+      try {
+        // chose the folder that file will be moved to
+        showSingleFolderChooser(imageItems);
+      } catch (IOException i) {
+        i.printStackTrace();
+      }
+    });
+
+    VBox actionVBox = new VBox();
+    actionVBox.getChildren().addAll(actionStatus);
+    actionVBox.setAlignment(Pos.CENTER);
+
+    Button buttonMainMenu = new Button("Go to Main Menu");
+    buttonMainMenu.setOnAction(e -> {
+      //if main menu is already open
+      if (primaryStage.isShowing()) {
+        primaryStage.toFront();
+      }
+      //if main menu is closed
+      else {
+        primaryStage.show();
+      }
+    });
+
+    HBox bottomHBox = new HBox(15);
+    bottomHBox.getChildren().addAll(buttonMoveFile, buttonMainMenu, actionVBox);
+
+    all = new BorderPane();
+    scrollBar = new VBox(10);
+    scrollBar.setPadding(new Insets(10, 10, 10, 10));
+    scroll.setPrefHeight(500);
+    scrollBar.getChildren().addAll(scroll);
+
+    all.setTop(scrollBar);
+    all.setCenter(listHBox);
+    all.setBottom(bottomHBox);
+
+    // style sheets using CSS
+    all.getStyleClass().add("pane");
+    tile.getStyleClass().add("pane");
+    scroll.getStyleClass().add("pane");
+    scrollBar.getStylesheets().add("sample/style.css");
+    BorderPane.setMargin(picsListView, new Insets(10));
+
+    Scene scene = new Scene(all, 900, 850);
+
+    ArrayList array = new ArrayList();
+    Collections.addAll(array, scene, picsListView, mapFileToImageView, folderListView, tile, all,
+        scrollBar, imageItems, actionStatus);
+    scenesMap.put(++numScenes, array);
+
+    galleryStage.setScene(scene);
+    scene.getStylesheets().add("sample/style.css");
+    galleryStage.show();
+
+  }
+
+  /**
+   * launch the selected image
+   *
+   * @param image to be launched
+   */
+  private void launchImage(File image) throws IOException {
+    selectedFile = image;
+    int indexSelected = picsListView.getItems().indexOf(image);
+    picsListView.getSelectionModel().selectIndices(indexSelected);
+    //galleryStage.close();
+    // Check if selected image has been serialized
+    boolean wasSerialized = false;
+    ImageFile imageFile = new ImageFile(image.getCanonicalPath());
+    for (ImageFile imf : m.getAllImageFiles()) {
+      if (imf.getFile().getName().equals(image.getName())) {
+        imageFile = imf;
+        wasSerialized = true;
+      }
+    }
+
+    if (!wasSerialized) {
+      ImageFile newImg = new ImageFile(image.getCanonicalPath());
+      user.viewFile(image, newImg);
+      m.addImageFile(newImg);
+      serialize();
+    } else {
+      user.viewFile(image, imageFile);
+    }
+
+    Text actionStatusOS = new Text();
+    actionStatusOS.setFont(Font.font("Calibri", FontWeight.NORMAL, 13));
+    actionStatusOS.setFill(Color.RED);
+
+    // Adapted from (Nov17/2017): https://docs.oracle.com/javase/tutorial/uiswing/misc/desktop.html
+    // Adapted from (Nov22/2017): https://docs.oracle.com/javase/tutorial/uiswing/misc/desktop.html
+    Button buttonOSDir = new Button("Go to file's OS directory");
+    buttonOSDir.setOnAction(e2 -> {
+      // Check if Desktop is supported on current platform
+      if (Desktop.isDesktopSupported()) {
+        // Use lambda to pass into Thread constructor an instance of anonymous class
+        // that implements Runnable and override method run()
+        new Thread(() -> {
+          Desktop desktop = Desktop.getDesktop();
+          // Check if action OPEN is supported on current platform
+          if (desktop.isSupported(Desktop.Action.OPEN)) {
+            try {
+              desktop.open(selectedFile.getParentFile());
+            } catch (IOException i) {
+              actionStatusOS.setText("Cannot open directory");
+              i.printStackTrace();
+            }
+          } else {
+            actionStatusOS.setText("Action not supported by current platform");
+          }
+          // calling start() causes this thread to execute run()
+        }).start();
+      } else {
+        actionStatusOS.setText("Action not supported by current platform");
+      }
+    });
+
+    Button buttonBackToDir = new Button("Go to Image Gallery");
+    buttonBackToDir.setOnAction(e3 -> {
+      all.getChildren().removeAll(imageBox);
+      all.setTop(scrollBar);
+    });
+
+    HBox topButtonsHBox = new HBox(15);
+    topButtonsHBox.getChildren().addAll(buttonBackToDir, buttonOSDir, actionStatusOS);
+
+    VBox tagBox = new VBox(10);
+    tagBox.setPadding(new Insets(15, 15, 15, 15));
+    tagBox.setAlignment(Pos.CENTER);
+
+    allTags = new ListView<>();
+    allTags.getItems().addAll(user.getCurrentImageObject().getAllTags());
+    allTags.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+
+    Label tagLabel = new Label("All Tags");
+    tagLabel.setTextFill(Color.BLACK);
+    tagLabel.setFont(Font.font("Calibri", FontWeight.NORMAL, 14));
+    HBox labelHb = new HBox();
+    labelHb.setAlignment(Pos.CENTER);
+    labelHb.getChildren().add(tagLabel);
+
+    // Button for adding tag
+    Button buttonAddTag = new Button("Add Tag");
+    buttonAddTag.setPrefWidth(120);
+    tagBox.setAlignment(Pos.CENTER);
+
+    buttonAddTag.setLayoutX(10);
+    buttonAddTag.setLayoutX(10);
+
+    TextField tag = new TextField();
+    tag.setPrefWidth(200);
+
+    BorderPane addTagBox = new BorderPane();
+    addTagBox.setPadding(new Insets(15, 15, 15, 15));
+    addTagBox.setLeft(tag);
+    addTagBox.setRight(buttonAddTag);
+
+    tagBox.getChildren().addAll(addTagBox);
+    buttonAddTag.setOnAction(e3 -> {
+      String tagged = tag.getText();
+
+      if (tagged.length() != 0) {
+        // add tag
+        try {
+          modifyImageName(true, false, tagged, null);
+        } catch (IOException e1) {
+          e1.printStackTrace();
+        }
+
+      }
+    });
+
+    // button for removing tag
+    Button buttonRemoveTag = new Button("Remove Selected Tag");
+    buttonRemoveTag.setPadding((Insets.EMPTY));
+    buttonRemoveTag.setPrefWidth(320);
+
+    buttonRemoveTag.setOnAction(e4 -> {
+      StringBuilder sb = new StringBuilder();
+      ObservableList<String> selectedTags = allTags.getSelectionModel().getSelectedItems();
+
+      for (String t : selectedTags) {
+        sb.append(t);
+        sb.append(", ");
+      }
+      String tagsToBeDeleted = sb.toString();
+
+      // if the tags to be deleted is not empty
+      if (tagsToBeDeleted.length() != 0) {
+        // add tag
+        try {
+          modifyImageName(false, true, tagsToBeDeleted, null);
+
+        } catch (IOException e1) {
+          e1.printStackTrace();
+        }
+
+      }
+    });
+
+    VBox tagListBox = new VBox();
+    tagListBox.getChildren().addAll(allTags, buttonRemoveTag);
+    tagListBox.setPadding(new Insets(0, 15, 5, 15));
+    tagListBox.setAlignment(Pos.CENTER);
+
+    tagBox.getChildren().addAll(labelHb);
+    tagBox.getChildren().addAll(tagListBox);
+
+    Button buttonAllTags = new Button("Universal Tags");
+    tagBox.getChildren().addAll(buttonAllTags);
+
+    buttonAllTags.setOnAction(e0 -> {
+      launchAllTagsTable();
+    });
+
+    Button buttonOldNames = new Button("Old Names");
+    tagBox.setAlignment(Pos.CENTER);
+    tagBox.getChildren().addAll(buttonOldNames);
+
+    buttonOldNames.setOnAction(e4 -> {
+      if (oldNamesStage == null) {
+        oldNamesStage = new Stage();
+      }
+      launchOldNamesTable();
+    });
+    actionStatus.setText("File selected: " + image.getAbsolutePath());
+
+    // if user was previously viewing an image, close the image
+    if (imageStage != null) {
+      imageStage.close();
+    }
+    imageStage = new Stage();
+    //Creating an image
+    try {
+      // Adapted from (Nov8/2017): https://www.tutorialspoint.com/javafx/javafx_images.htm
+      Image imageSelected = new Image(
+          new FileInputStream(image));
+
+      ImageView imageView = new ImageView(imageSelected);
+      imageView.setX(50);
+      imageView.setY(70);
+      imageView.setFitHeight(430);
+      imageView.setFitWidth(430);
+
+      imageView.setPreserveRatio(true);
+
+      tagBox.setPrefSize(300, 400);
+
+      BorderPane borderPane = new BorderPane();
+      borderPane.setPadding(new Insets(15, 15, 15, 15));
+      borderPane.setTop(topButtonsHBox);
+      BorderPane.setMargin(topButtonsHBox, new Insets(10, 10, 10, 10));
+      borderPane.setLeft(imageView);
+      BorderPane.setMargin(imageView, new Insets(10, 10, 10, 10));
+      borderPane.setRight(tagBox);
+      //borderPane.setBottom(actionStatus);
+      imageBox = new VBox(10);
+      imageBox.setPadding(new Insets(10, 10, 10, 10));
+      borderPane.setPrefHeight(500);
+      imageBox.getChildren().addAll(borderPane);
+
+      all.getChildren().removeAll(scrollBar);
+      all.setTop(imageBox);
+
+    } catch (FileNotFoundException c) {
+      c.printStackTrace();
+    }
+  }
+
+
+  /**
+   * launches a table application for the history of file name changes
+   */
+  void launchTable() {
+    // create a stage
+    if (logStage == null) {
+      logStage = new Stage();
+    }
+    // fill the table with the loggable information
+    ArrayList<LogObject> loggables = m.getLoggables();
+    LogTable logTable = new LogTable(loggables);
+    logTable.start(logStage); // start the stage
+  }
+
+
+  /**
+   * modifyImageName updates the File depanding on user's action. If user is adding a tag, addTag
+   * should be true, if the user is deleting a tag, deleteTag should be true, else user is renaming
+   * a file.
+   *
+   * @param addTag true if the user is adding a tag
+   * @param deleteTag true if the user is deleting a tag
+   * @param tags is not empty if the user is adding or deleting a tag
+   * @param newFile is not empty if the user is renaming the file
+   */
+  private void modifyImageName(
+      boolean addTag, boolean deleteTag, String tags, File newFile)
+      throws IOException {
+    // original File
+    File originalFile = user.getCurrentFile();
+    // original ImageView of original File
+    ImageView originalImageView = mapFileToImageView.get(originalFile);
+
+    // if user is adding tag
+    if (addTag) {
+      user.addTag(tags);
+
+      //TODO: move this to ImageFileView class
+      for (String s : tags.split(", ")) {
+        if (!allTags.getItems().contains(s)) {
+          String[] tagAdded = {s};
+          allTags.getItems().addAll(tagAdded);
+        }
+      }
+    } else if (deleteTag) { // if user is deleting tag
+      //TODO: move this to ImageFileView class
+      user.deleteTag(tags);
+      allTags.getItems().removeAll(tags.split(", "));
+    } else {
+      user.updateFile(selectedFile, newFile, tags, true);
+    }
+
+    // update the current selected file
+    selectedFile = user.getCurrentFile();
+
+    // update the File/file name displayed on the image ListView
+    int observableIndex = imageItems.indexOf(originalFile);
+    imageItems.set(observableIndex, selectedFile); // replace the image in the ObservableList
+
+    // create a new ImageView associated with the renamed file
+    ImageView newImageView = new ImageView(new Image(new FileInputStream(selectedFile)));
+    newImageView.setImage(newImageView.getImage());
+    newImageView.setFitWidth(250);
+    newImageView.setPreserveRatio(true);
+    newImageView.setOnMouseClicked(new SingleClick(user.getCurrentFile()));
+
+    // replace the old ImageView with newImageView
+    // updating will allow the image to still be clickable after rename
+    int tileIndex = tile.getChildren().indexOf(originalImageView);
+    tile.getChildren().set(tileIndex, newImageView);
+
+    // update new filename in hashmap and map it to associated image object
+    mapFileToImageView.remove(originalFile);
+    mapFileToImageView.put(selectedFile, newImageView);
+
+    // update the action status
+    actionStatus.setText("File selected: " + selectedFile.getName());
+
+    // serialize the changes made
+    serialize();
+  }
+
+  /**
+   * launches a Stage table of all old names of a selected image. Button on the stage allows the
+   * user to revert back to the selected old name
+   */
+  private void launchOldNamesTable() {
+    oldNamesStage.setTitle("Old Data");
+
+    // set up a new list view
+    ListView<String> oldView = new ListView<>();
+    oldView.getItems().addAll(user.getCurrentImageObject().getOldNames());
+    oldView.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
+
+    // set up new vbox for the listview
+    VBox oldNamesBox = new VBox(20);
+    oldNamesBox.setPadding(new Insets(15, 15, 15, 15));
+    oldNamesBox.setAlignment(Pos.CENTER);
+
+    // set up button for the name reversion
+    Label nameLabel = new Label("Revert To...");
+    nameLabel.setTextFill(Color.BLACK);
+    nameLabel.setFont(Font.font("Calibri", FontWeight.NORMAL, 18));
+    HBox nameLabelHb = new HBox();
+    nameLabelHb.setAlignment(Pos.CENTER);
+    nameLabelHb.getChildren().add(nameLabel);
+    Button oldNameSelected = new Button("Rename");
+
+    oldNameSelected.setOnAction(eB -> {
+      String selected = oldView.getSelectionModel().getSelectedItem();
+      File revertedFile = new File(user.getCurrentFile().getParent() + "/" + selected);
+      try {
+        //TODO: move this to ImageFileView class
+        // clear all the tags in the listview
+        allTags.getItems().clear();
+
+        // get all the tags of the file name that the user is reverting to
+        int nameEndIndex = revertedFile.getName().indexOf("@");
+        int photoTypeIndex = revertedFile.getName().lastIndexOf(".");
+        StringBuilder tagCSV = new StringBuilder();
+
+        // if a tag exists in the name user is reverting to
+        if (nameEndIndex >= 0) {
+          String stringTags = revertedFile.getName().substring(nameEndIndex + 1, photoTypeIndex);
+          String[] atSplit = stringTags.split(" @");
+          for (String st : atSplit) {
+            tagCSV.append(st).append(", ");
+          }
+          allTags.getItems().addAll(atSplit);
+        }
+        modifyImageName(false, false, tagCSV.toString(), revertedFile);
+        oldNamesStage.close();
+
+      } catch (IOException e1) {
+        e1.printStackTrace();
+      }
+    });
+
+    oldNamesBox.getChildren().addAll(nameLabel, oldView, oldNameSelected);
+    Scene tagsScene = new Scene(oldNamesBox, 500, 250);
+    oldNamesStage.setScene(tagsScene);
+    oldNamesStage.show();
+  }
+
+  private void launchAllTagsTable() {
+    Stage allTagsStage = new Stage();
+    // set up a new list view
+    ListView<String> universalTags = new ListView<>();
+    universalTags.getItems().addAll(m.getUniversalTags());
+    universalTags.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+
+    // set up new vbox for the listview
+    VBox allTagsBox = new VBox(20);
+    allTagsBox.setPadding(new Insets(15, 15, 15, 15));
+    allTagsBox.setAlignment(Pos.CENTER);
+
+    // set up button for the name reversion
+    Label nameLabel = new Label("Add Tag");
+    nameLabel.setTextFill(Color.BLACK);
+    nameLabel.setFont(Font.font("Calibri", FontWeight.NORMAL, 18));
+    HBox nameLabelHb = new HBox();
+    nameLabelHb.setAlignment(Pos.CENTER);
+    nameLabelHb.getChildren().add(nameLabel);
+    Button tagSelected = new Button("Add Tag");
+
+    tagSelected.setOnAction(e2 -> {
+      String tag = universalTags.getSelectionModel().getSelectedItem();
+      try {
+        modifyImageName(true, false, tag, null);
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+    });
+
+    allTagsBox.getChildren().addAll(nameLabel, universalTags, tagSelected);
+    Scene tagsScene = new Scene(allTagsBox, 500, 250);
+    allTagsStage.setScene(tagsScene);
+    tagsScene.getStylesheets().addAll("sample/style.css");
+    allTagsStage.show();
+  }
+
+  /**
+   * launch a view of all images from a selected directory
+   */
+  private void launchFolderImages(File folder) throws IOException {
+
+    //retrieve list of directory's files
+    ArrayList<File> directoryPics = m.getFiles(folder);
+
+    //Stage chosenFolderStage = new Stage();
+    //Once you choose a directory, a new window opens displaying the images
+    if (galleryStage == null) {
+      galleryStage = new Stage();
+    }
+
+    // Status message text
+    actionStatus = new Text();
+    actionStatus.setFont(Font.font("Calibri", FontWeight.NORMAL, 13));
+    actionStatus.setFill(Color.GREEN);
+
+    // Adapted from (Nov10/2017):
+    // https://docs.oracle.com/javase/8/javafx/user-interface-tutorial/list-view.htm#CEGGEDBF
+    // picsListView is a ListView of all image in files in chosen directory
+    picsListView = new ListView<>();
+    // make the items in picsListView Observable
+    imageItems = FXCollections.observableArrayList(directoryPics);
+    picsListView.setItems(imageItems);
+    picsListView.setCellFactory(list -> new FileDisplay());
+
+    //https://stackoverflow.com/questions/9722418/how-to-handle-listview-item-clicked-action
+
+    //HashMap to keep track of which ImageView is associated with which file
+    mapFileToImageView = new HashMap<>();
+    picsListView.setOnMouseClicked(e -> {
+      try {
+        launchImage(picsListView.getSelectionModel().getSelectedItem());
+      } catch (IOException e1) {
+        e1.printStackTrace();
+      }
+    });
+
+    folderListView = new ListView<>();
+    ArrayList<File> directoryFolders = new ArrayList<>();
+    File[] files = folder.listFiles();
+    if (files != null) {
+      for (File file : files) {
+        if (file.isDirectory()) {
+          directoryFolders.add(file);
+        }
+      }
+    }
+
+    ObservableList<File> folderItems = FXCollections.observableArrayList(directoryFolders);
+
+    folderListView.setItems(folderItems);
+    folderListView.setCellFactory(list -> new FolderDisplay());
+
+    Button buttonFolder = new Button("Go to folder");
+
+    buttonFolder.setOnAction(e -> {
+      File chosenFolder = (File) folderListView.getSelectionModel().getSelectedItem();
+      try {
+        launchFolderImages(chosenFolder);
+      } catch (IOException e1) {
+        e1.printStackTrace();
+      }
+
+    });
+
+    Button buttonBack = new Button("Go Back");
+    buttonBack.setOnAction(e3 -> {
+
+      // Remove current scene and decrease counter by 1
+      scenesMap.remove(numScenes--);
+      // Get information from previous scene
+      ArrayList sceneArray = scenesMap.get(numScenes);
+
+      // Set the global variables to scene's info
+      Scene scene = (Scene) sceneArray.get(0);
+      picsListView = (ListView<File>) sceneArray.get(1);
+      mapFileToImageView = (HashMap<File, ImageView>) sceneArray.get(2);
+      folderListView = (ListView<File>) sceneArray.get(3);
+      tile = (TilePane) sceneArray.get(4);
+      all = (BorderPane) sceneArray.get(5);
+      scrollBar = (VBox) sceneArray.get(6);
+      imageItems = (ObservableList<File>) sceneArray.get(7);
+      actionStatus = (Text) sceneArray.get(8);
+
+      galleryStage.setScene(scene);
+      galleryStage.show();
+    });
+
+    HBox folderHBox = new HBox(10);
+    folderHBox.getChildren().addAll(buttonBack, buttonFolder);
+    folderHBox.setAlignment(Pos.TOP_RIGHT);
+
+    Text picsText = new Text("Images:");
+    Text folderText = new Text("Folders:");
+
+    VBox picsVBox = new VBox(10);
+    picsVBox.getChildren().addAll(picsText, picsListView);
+
+    VBox folderVBox = new VBox(10);
+    folderVBox.getChildren().addAll(folderText, folderListView, folderHBox);
+
+    HBox listHBox = new HBox(10);
+    listHBox.getChildren().addAll(picsVBox, folderVBox);
+    picsListView.setPrefWidth(420);
+    folderListView.setPrefWidth(420);
+    listHBox.setAlignment(Pos.CENTER);
+
+
+    // a new scroll pane so user can scroll through images in the gallery
+    ScrollPane scroll = new ScrollPane();
+    // scroll properties
+    scroll.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+    scroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED);
+    scroll.setFitToWidth(true);
+    scroll.setContent(tile);
+
+    // button for moving a file to another directory
+    Button buttonMoveFile = new Button("Move To...");
+    buttonMoveFile.setOnAction(e -> {
+      try {
+        // chose the folder that file will be moved to
+        showSingleFolderChooser(imageItems);
+      } catch (IOException i) {
+        i.printStackTrace();
+      }
+    });
+
+    VBox actionVBox = new VBox();
+    actionVBox.getChildren().addAll(actionStatus);
+    actionVBox.setAlignment(Pos.CENTER);
+
+    Button buttonMainMenu = new Button("Go to Main Menu");
+    buttonMainMenu.setOnAction(e -> {
+      //if main menu is already open
+      if (primaryStage.isShowing()) {
+        primaryStage.toFront();
+      }
+      //if main menu is closed
+      else {
+        primaryStage.show();
+      }
+    });
+
+    HBox bottomHBox = new HBox(15);
+    bottomHBox.getChildren().addAll(buttonMoveFile, buttonMainMenu, actionVBox);
+
+    all = new BorderPane();
+    scrollBar = new VBox(10);
+    scrollBar.setPadding(new Insets(10, 10, 10, 10));
+    scroll.setPrefHeight(500);
+    scrollBar.getChildren().addAll(scroll);
+
+    all.setTop(scrollBar);
+    all.setCenter(listHBox);
+    all.setBottom(bottomHBox);
+
+    // style sheets using CSS
+    all.getStyleClass().add("pane");
+    tile.getStyleClass().add("pane");
+    scroll.getStyleClass().add("pane");
+    scrollBar.getStylesheets().add("sample/style.css");
+    BorderPane.setMargin(listHBox, new Insets(10));
+
+    Scene scene = new Scene(all, 900, 850);
+
+    // Add scene to HashMap to keep track of scene and its associated info
+    ArrayList array = new ArrayList();
+    Collections.addAll(array, scene, picsListView, mapFileToImageView, folderListView, tile, all,
+        scrollBar, imageItems, actionStatus);
+    scenesMap.put(++numScenes, array);
+
+    galleryStage.setScene(scene);
+    scene.getStylesheets().add("sample/style.css");
+    galleryStage.show();
+
+  }
+
+  // CLASSES:
+
+  /**
+   * An EventHandler for a each image tile when clicked
+   */
+  public class SingleClick implements EventHandler<MouseEvent> {
+
+    private File image;
+
+    SingleClick(File image) {
+      this.image = image;
+    }
+
+    @Override
+    public void handle(MouseEvent event) {
+      try {
+        launchImage(image);
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
+      event.consume();
+    }
+  }
+
+  // Adapted from (Nov10/2017):
+  // https://docs.oracle.com/javase/8/javafx/user-interface-tutorial/list-view.htm#CEGGEDBF
+
+  /**
+   * Displays each File item in picsListView's ObservableList imageItems
+   * Updates the ListView display when changes are made to the list of File items
+   */
+  static class FileDisplay extends ListCell<File> {
+
+    ImageView imageView = new ImageView();
+
+    /**
+     * File is displayed in a ListView cell that updates when changes are made to the filename
+     *
+     * @param item File to be displayed in cell
+     * @param empty Is true if item's value is null
+     */
+    @Override
+    public void updateItem(File item, boolean empty) {
+      super.updateItem(item, empty);
+      if (empty) {
+        setGraphic(null);
+        setText(null);
+      } else {
+        try {
+          Image image = new Image(new FileInputStream(item));
+          imageView.setImage(image);
+          imageView.setFitWidth(30);
+          imageView.setPreserveRatio(true);
+          setGraphic(imageView);
+        } catch (FileNotFoundException c) {
+          c.printStackTrace();
+        }
+        setText(item.getName());
+      }
+    }
+  }
+
+  /**
+   * Displays each Folder item in folderListView's ObservableList folderItems
+   */
+  static class FolderDisplay extends ListCell<File> {
+
+    @Override
+    public void updateItem(File item, boolean empty) {
+      super.updateItem(item, empty);
+      setGraphic(null);
+      if (empty) {
+        setText(null);
+      } else {
+        setText(item.getName());
+      }
+
+    }
+  }
+
+}
+
+
+String originalName = ((String[]) arg)[0];
+    String newName = ((String[]) arg)[1];
+    String tags = ((String[]) arg)[2];
+    if (tags == ""){
+        boolean matchFound = false;
+        int i = 0;
+        while (i < allFiles.size() && !matchFound){
+            if (allFiles.get(i).getName().equals(originalName)){
+                matchFound = true;
+            } else {
+                i += 1;
+            }
+        }
+
+        if (matchFound) {
+            allImageFiles.remove(i);
+        }
+    }

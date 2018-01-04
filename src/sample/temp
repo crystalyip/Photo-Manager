@@ -1,0 +1,414 @@
+package sample;
+
+import Tagger.*;
+import java.util.ArrayList;
+import java.io.*;
+import javafx.application.Application;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.scene.Group;
+import javafx.scene.control.*;
+import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.stage.Stage;
+import javafx.stage.FileChooser;
+import javafx.stage.DirectoryChooser;
+import javafx.stage.FileChooser.ExtensionFilter;
+import javafx.scene.Scene;
+import javafx.scene.layout.VBox;
+import javafx.scene.layout.HBox;
+import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
+import javafx.scene.text.Text;
+import javafx.scene.paint.Color;
+import javafx.geometry.Pos;
+import javafx.geometry.Insets;
+import javafx.event.ActionEvent;
+import javafx.event.EventHandler;
+import java.io.File;
+import java.util.Arrays;
+import java.util.List;
+
+import sun.rmi.runtime.Log;
+
+public class Main extends Application {
+    private Stage primaryStage;
+    private Text actionStatus;
+    private Stage savedStage;
+    private File selectedFile;
+    private static final String titleTxt = "JavaFX File Chooser Example 1";
+    User user = new User();
+    FileManager m = new FileManager();
+    private TableView table = new TableView();
+    ArrayList<LogObject> loggables;
+    ArrayList<LogObject> arraylist;
+
+    //initialize 3 columns, using Log class to extract info
+    TableColumn<LogObject, String> newNameColumn = new TableColumn<>("New Name");
+    TableColumn<LogObject, String> oldNameColumn = new TableColumn<>("Old Name");
+    TableColumn<LogObject, String> timeStampColumn = new TableColumn<>("Timestamp");
+    // For image launching
+    Stage dirStage = new Stage();
+    DirectoryChooser directoryChooser = new DirectoryChooser();
+    File chosen = directoryChooser.showDialog(dirStage);
+    File[] directoryPics;
+
+    Button buttonDirectory;
+    Button buttonLog;
+    ListView<File> picsListView;
+    ArrayList<File> arrayPics;
+
+    public static void main(String [] args) {
+
+        Application.launch(args);
+    }
+
+    @Override
+    public void start(Stage primaryStage) {
+        this.primaryStage = primaryStage;
+        user.addObserver(m);
+        primaryStage.setTitle(titleTxt);
+
+        //Add all 3 columns to table
+        table.getColumns().addAll(newNameColumn, oldNameColumn, timeStampColumn);
+
+        // Window label
+        Label label = new Label("Photo Manager");
+        label.setTextFill(Color.DARKBLUE);
+        label.setFont(Font.font("Calibri", FontWeight.BOLD, 36));
+        HBox labelHb = new HBox();
+        labelHb.setAlignment(Pos.CENTER);
+        labelHb.getChildren().add(label);
+
+        // Buttons
+        Button btn1 = new Button("Choose a Directory...");
+        btn1.setOnAction(new SingleFcButtonListener());
+        HBox buttonHb1 = new HBox(10);
+        buttonHb1.setAlignment(Pos.CENTER);
+        buttonHb1.getChildren().addAll(btn1);
+
+
+        Button btn2 = new Button("Add Tag");
+        HBox buttonHb2 = new HBox(10);
+        buttonHb1.setAlignment(Pos.CENTER);
+        buttonHb1.getChildren().addAll(btn2);
+        TextField tag = new TextField();
+        HBox Hbtext = new HBox(10);
+        Hbtext.setAlignment(Pos.CENTER);
+        Hbtext.getChildren().addAll(tag);
+
+        btn2.setOnAction(e ->{
+            String tagged = tag.getText();
+            //System.out.println(tagged);
+            if (tagged != null){
+                user.addTag(tagged);
+                selectedFile = user.getCurrentFile();
+                actionStatus.setText("File selected: " + selectedFile.getName());
+                serialize();
+            }
+        });
+
+        Button btn3 = new Button("Get Log");
+        HBox buttonHb3 = new HBox(10);
+        buttonHb3.setAlignment(Pos.CENTER);
+        buttonHb3.getChildren().addAll(btn3);
+
+        btn3.setOnAction(e ->{
+            launchTable();
+
+        });
+
+        Button btn4 = new Button("Move To...");
+        btn4.setOnAction(new SingleFldButtonListener());
+        HBox buttonHb4 = new HBox(10);
+        buttonHb1.setAlignment(Pos.CENTER);
+        buttonHb1.getChildren().addAll(btn4);
+
+        Button btn5 = new Button("Remove Tag");
+        HBox buttonHb5 = new HBox(10);
+        buttonHb1.setAlignment(Pos.CENTER);
+        buttonHb1.getChildren().addAll(btn5);
+
+
+        btn5.setOnAction(e ->{
+            String tagged = tag.getText();
+            System.out.println(tagged);
+            if (tagged != null){
+                user.deleteTag(tagged);
+                selectedFile = user.getCurrentFile();
+                actionStatus.setText("File selected: " + selectedFile.getName());
+                serialize();
+            }
+
+        });
+
+
+
+        // Status message text
+        actionStatus = new Text();
+        actionStatus.setFont(Font.font("Calibri", FontWeight.NORMAL, 13));
+        actionStatus.setFill(Color.GREEN);
+
+        // Vbox
+        VBox vbox = new VBox(30);
+        vbox.setPadding(new Insets(25, 25, 25, 25));;
+        vbox.getChildren().addAll(labelHb, buttonHb1, buttonHb3, buttonHb4, buttonHb2, Hbtext, buttonHb5, actionStatus);
+
+        // Scene
+        Scene scene = new Scene(vbox, 500, 500); // w x h
+
+        primaryStage.setScene(scene);
+        primaryStage.show();
+
+        savedStage = primaryStage;
+    }
+
+    private class SingleFcButtonListener implements EventHandler<ActionEvent> {
+
+        @Override
+        public void handle(ActionEvent e) {
+
+            try {
+                showSingleFileChooser();
+            } catch (IOException e1) {
+                e1.printStackTrace();
+            }
+        }
+    }
+
+    private class SingleFldButtonListener implements EventHandler<ActionEvent> {
+
+        @Override
+        public void handle(ActionEvent e) {
+
+            try {
+                showSingleFolderChooser();
+            } catch (IOException e1) {
+                e1.printStackTrace();
+            }
+        }
+    }
+
+    private void showSingleFileChooser() throws IOException {
+
+        FileChooser fileChooser = new FileChooser();
+        selectedFile = fileChooser.showOpenDialog(null);
+
+        if (selectedFile != null) {
+
+            user.viewFile(selectedFile);
+            //System.out.println(selectedFile.getCanonicalPath());
+            actionStatus.setText("File selected: " + selectedFile.getName());
+        }
+        else {
+            actionStatus.setText("File selection cancelled.");
+        }
+    }
+
+    private void showSingleFolderChooser() throws IOException {
+
+        DirectoryChooser folderChooser = new DirectoryChooser();
+        File selectedFolder = folderChooser.showDialog(primaryStage);
+
+        if (selectedFolder != null) {
+            user.moveFile( selectedFolder.getCanonicalPath() + "/");
+        }
+        else {
+            actionStatus.setText("File selection cancelled.");
+        }
+    }
+
+    private class MultipleFcButtonListener implements EventHandler<ActionEvent> {
+
+        @Override
+        public void handle(ActionEvent e) {
+
+            showMultipleFileChooser();
+        }
+    }
+
+    private void showMultipleFileChooser() {
+
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Select PDF files");
+        fileChooser.setInitialDirectory(new File("X:\\testdir\\two"));
+        fileChooser.getExtensionFilters().addAll(
+                new ExtensionFilter("PDF Files", "*.pdf"));
+        List<File> selectedFiles = fileChooser.showOpenMultipleDialog(savedStage);
+
+        if (selectedFiles != null) {
+
+            actionStatus.setText("PDF Files selected [" + selectedFiles.size() + "]: " +
+                    selectedFiles.get(0).getName() + "..");
+        }
+        else {
+            actionStatus.setText("PDF file selection cancelled.");
+        }
+    }
+
+    private void deserialize(){
+        File serFile = new File("/Users/crystalyip/Desktop/testing2/serializing/filemanager.ser");
+        arraylist= new ArrayList<LogObject>();
+        // if information has been serialized before, deserialize the information
+        // check if a filemanager.ser file exists
+        if (serFile.exists() && !serFile.isDirectory()) { // previous information has been serialized before
+            try {
+                FileInputStream fis = new FileInputStream("/Users/crystalyip/Desktop/testing2/serializing/filemanager.ser");
+                ObjectInputStream ois = new ObjectInputStream(fis);
+                arraylist = (ArrayList) ois.readObject();
+                ois.close();
+                fis.close();
+            } catch (IOException ioe) {
+                //ioe.printStackTrace();
+                System.out.println("User has not made any changes yet.");
+                return;
+            } catch (ClassNotFoundException c) {
+                System.out.println("Class not found");
+                c.printStackTrace();
+                return;
+            }
+        }
+        loggables = arraylist;
+    }
+
+    private void serialize(){
+        deserialize();
+        // take the new information that is going to be serialized and combine it with the arraylist of deserialized information
+        arraylist.add(m.getLoggables().get(m.getLoggables().size()-1));
+        // serialize the new combined master array list of information
+        try{
+            FileOutputStream fos= new FileOutputStream("/Users/crystalyip/Desktop/testing2/serializing/filemanager.ser");
+            ObjectOutputStream oos= new ObjectOutputStream(fos);
+            oos.writeObject(arraylist);
+            oos.close();
+            fos.close();
+        }catch(IOException ioe){
+            ioe.printStackTrace();
+        }
+    }
+
+
+
+    private void launchTable(){
+        Stage stage = new Stage();
+        stage.setTitle("Log Table");
+        stage.setWidth(915);
+        stage.setHeight(500);
+
+        final Label label1 = new Label("Renaming History");
+        label1.setFont(new Font("Arial", 20));
+
+        table.setEditable(false);
+
+
+        //Assign each column to a instance variable of Log Object
+        oldNameColumn.setCellValueFactory(new PropertyValueFactory<>("oldName"));
+        newNameColumn.setCellValueFactory(new PropertyValueFactory<>("newName"));
+        timeStampColumn.setCellValueFactory(new PropertyValueFactory<>("timeStamp"));
+        deserialize();
+        ObservableList<LogObject> listOfLogs = FXCollections.observableArrayList(loggables);
+
+        //Initialize table to list of Log objects
+        table.setItems(listOfLogs);
+
+
+
+        final VBox vbox = new VBox();
+        vbox.setSpacing(5);
+        vbox.setPadding(new Insets(10, 10, 10, 10));
+        vbox.getChildren().addAll(label1, table);
+
+        Scene scene = new Scene(vbox, 915, 500);
+
+        stage.setScene(scene);
+        stage.show();
+    }
+
+    // launch a view of all files in a directory
+    private void launchDirectoryImages(){
+        //retrieve list of folder's image files
+        directoryPics = chosen.listFiles();
+
+        arrayPics = new ArrayList<>(Arrays.asList(directoryPics));
+        picsListView = new ListView<>();
+        ObservableList<File> items = FXCollections.observableArrayList (arrayPics);
+        picsListView.setItems(items);
+        Button buttonSelect = new Button("Select Image");
+
+        buttonSelect.setOnAction(e1 -> {
+            launchImage();
+        });
+
+    }
+
+    private void launchImage(){
+        File imageFile = picsListView.getSelectionModel().getSelectedItem();
+        Stage imageStage = new Stage();
+        //Creating an image
+        try {
+            Image image = new Image(
+                    new FileInputStream(imageFile));
+
+            //Setting the image view
+            ImageView imageView = new ImageView(image);
+
+            //Setting the position of the image
+            imageView.setX(50);
+            imageView.setY(60);
+
+            //setting the fit height and width of the image view
+            imageView.setFitHeight(400);
+            imageView.setFitWidth(400);
+
+            //Setting the preserve ratio of the image view
+            imageView.setPreserveRatio(true);
+
+            //Creating a Group object
+            Group root = new Group(imageView);
+            //Creating a scene object
+            Scene scene = new Scene(root, 600, 500);
+
+            //Setting title to the Stage
+            imageStage.setTitle("Loading an image");
+
+            //Adding scene to the stage
+            imageStage.setScene(scene);
+
+            //Displaying the contents of the stage
+            imageStage.show();
+        }
+        catch (FileNotFoundException c) {
+            c.printStackTrace();
+        }
+    }
+}
+
+
+buttonOldNames.setOnAction(e -> {
+      Stage OldNamesStage =  new Stage();
+      ListView<String> oldNames = new ListView<>();
+      oldNames.getItems().addAll(user.getImageObjFile().getOldNames());
+      oldNames.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
+
+      VBox oldNamesBox = new VBox(20);
+      oldNamesBox.setPadding(new Insets(15, 15, 15, 15));
+      oldNamesBox.setAlignment(Pos.CENTER);
+      Label nameLabel = new Label("Choose an old name to return to");
+      nameLabel.setTextFill(Color.BLACK);
+      nameLabel.setFont(Font.font("Calibri", FontWeight.NORMAL, 18));
+      HBox nameLabelHb = new HBox();
+      nameLabelHb.setAlignment(Pos.CENTER);
+      nameLabelHb.getChildren().add(nameLabel);
+      Button oldNameSelected = new Button("Rename");
+      oldNamesBox.getChildren().addAll(nameLabel, oldNames, oldNameSelected);
+
+      // TODO: A METHOD THAT RENAME THE IMAGE ONCE YOU PRESS THE RENAME BUTTON
+      /*
+      buttonTags.setOnAction(e -> method to the back end that actually deletes the tags selected)
+       */
+
+      Scene tagsScene = new Scene(oldNamesBox, 300, 250);
+      OldNamesStage.setScene(tagsScene);
+      OldNamesStage.show();
+    });
